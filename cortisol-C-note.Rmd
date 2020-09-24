@@ -1,0 +1,140 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+```{r setup, include=FALSE}
+#Install packages
+install.packages("bibliometrix")
+install.packages("tidyverse")
+
+#Set system locale
+Sys.setlocale("LC_ALL", "C")
+
+#Load packages
+library(bibliometrix)
+library(tidyverse)
+
+#Convert .bib files into bib-dataframe
+
+cortisol_C<-convert2df(c("cortisol-C.bib", "cortisol-C (1).bib", "cortisol-C (2).bib", "cortisol-C (3).bib", "cortisol-C (4).bib", "cortisol-C (5).bib", "cortisol-C (6).bib", "cortisol-C (7).bib", "cortisol-C (8).bib", "cortisol-C (9).bib", "cortisol-C (10).bib", "cortisol-C (11).bib", "cortisol-C (12).bib"), dbsource = "wos", format = "bibtex")
+
+#Remove publications without publication year (Early Eccess articles)
+cortisol_C <- cortisol_C[complete.cases(cortisol_C[,53]),]
+```
+
+# Trend
+
+## Original Trend for Cortisol + Child
+
+```{r raw trend, echo=F}
+#Convert bib-dataframe to dataframe (in order to manage it using tidyverse)
+cortisol_C.df <- data.frame(cortisol_C)
+
+#Calculate publication number for each year (2020 is excluded)
+cortisol_C.PN <- cortisol_C.df %>% filter(is.na(PY)==F & PY != 2020) %>% group_by(PY) %>% summarise(number=n()) %>% ungroup()
+
+#Line plot
+cortisol_C.PN %>% ggplot(mapping = aes(PY, number)) + geom_line() + xlab("Year") + ylab("Publication Number")
+
+#Smoothed line plot using LOESS
+cortisol_C.PN %>% ggplot(mapping = aes(PY, number)) + geom_smooth(span=0.2) + xlab("Year") + ylab("Publication Number")
+```
+
+## Original Trend for Child
+
+```{r child trend, echo=FALSE}
+#Read publication number of child (from Dimensions)
+child <- read.csv(file = "child.csv")
+
+#Combine child and cortisol dataset
+cortisol_C_child <- cortisol_C.PN %>% inner_join(child, by = "PY")
+
+#Line plot
+cortisol_C_child %>% ggplot(mapping = aes(PY, child)) + geom_line() + xlab("Year") + ylab("Publication Number")
+
+#Smoothed line plot using LOESS
+cortisol_C_child %>% ggplot(mapping = aes(PY, child)) + geom_smooth() + xlab("Year") + ylab("Publication Number")
+```
+
+## Adjusted Trend
+
+```{r Cortisol-Child Ratio, echo=FALSE}
+#Line plot
+##(36920 is Quotient of the publication number of child in 1963 divided by which of cortisol in 1963)
+cortisol_C_child %>% ggplot() + geom_line(aes(PY, number*36920/child)) + xlab("Year") + ylab("Adjusted Publication Number") + labs(title = "Cortisol-Child Ratio")
+
+#Smoothed line plot using LOESS
+cortisol_C_child %>% ggplot() + geom_smooth(aes(PY, number*36920/child), span=0.2) + xlab("Year") + ylab("Adjusted Publication Number") + labs(title = "Cortisol-Child Ratio")
+```
+
+# Network Analysis
+
+## Author (University) Network
+
+```{r university network for each year, eval=FALSE, include=FALSE}
+#Extract university info for each publication
+cortisol_C <- metaTagExtraction(cortisol_C, Field = "AU_UN")
+
+#Output university network plots before different years (to see the changes across time)
+for (i in 198:202) {
+  filename <- paste("university", i*10, ".jpeg", sep = "")
+  jpeg(filename, width = 1600, height = 900)
+  data<-cortisol_C[which(cortisol_C$PY<i*10),]
+  NetMatrix.uni <- biblioNetwork(data, analysis = "collaboration", network = "universities", shortlabel = F)
+  net.uni <- networkPlot(NetMatrix.uni, n = dim(NetMatrix.uni)[1], Title = paste("University Collaboration Network (1963-", i*10-1, ")", sep = ""), type = "auto", size = T, remove.multiple=FALSE, labelsize=0.7,edgesize = 5)
+  dev.off()
+}
+```
+
+
+```{r university network plot, echo=FALSE}
+#University network before 1990
+data<-cortisol_C[which(cortisol_C$PY<1990),]
+NetMatrix.uni <- biblioNetwork(data, analysis = "collaboration", network = "universities", shortlabel = F)
+net.uni <- networkPlot(NetMatrix.uni, n = 30, Title = "University Collaboration Network (1963-1989)", type = "fruchterman", size = T, remove.multiple=FALSE, labelsize=0.7,edgesize = 5)
+
+#University network utill now
+NetMatrix.uni <- biblioNetwork(cortisol_C, analysis = "collaboration", network = "universities", shortlabel = F)
+net.uni <- networkPlot(NetMatrix.uni, n = 30, Title = "University Collaboration Network (1963-2020)", type = "fruchterman", size = T, remove.multiple=FALSE, labelsize=0.7,edgesize = 5)
+```
+
+## Historical Direct Citation Network
+
+```{r citation network for different citation number, eval=FALSE, include=FALSE}
+#Output citation network for different citation number
+for (i in 3:10) {
+  filename <- paste("hist", i*50, ".jpeg", sep = "")
+  jpeg(filename, width = 1600, height = 900)
+  histPlot(histResults.cortisol_C, n=i*50, size = 5, labelsize = 3)
+  dev.off()
+}
+```
+
+```{r citation network, echo=FALSE}
+#Historical Direct Citation Network without labels
+histResults.cortisol_C <- histNetwork(cortisol_C, min.citations = 1, sep = ";")
+net.hist.cortisol_C<- histPlot(histResults.cortisol_C, n=250, size = 5, labelsize = 0)
+```
+
+
+## Keyword Network (Cluster Analysis)
+
+```{r Count keywords, eval=FALSE, include=FALSE}
+#Count keywords for different minimum occurrences of terms
+keywordcount <- data.frame()
+for (i in 1:10) {
+  assign(paste("CS.cortisol_C", i*10, sep = "."), conceptualStructure(cortisol_C,field="ID", method="CA", minDegree=i*10, clust="auto", stemming=FALSE, labelsize=10, documents=10))
+  keywordcount <- rbind(keywordcount, c(i*10, length(get(paste("CS.cortisol_C", i*10, sep = "."))$km.res$cluster)))
+}
+colnames(keywordcount) <- c("minDegree", "Count")
+```
+
+```{r Cluster Analysis, echo=FALSE}
+#Dendrogram
+CS.cortisol_C.70.4 <- conceptualStructure(cortisol_C,field="ID", method="CA", minDegree=70, clust=4, stemming=FALSE, labelsize=10, documents=10)
+
+#Result for cluster analysis
+cluster.70.4<-CS.cortisol_C.70.4$km.res$cluster %>% data.frame() %>% rownames_to_column(var = "keyword")
+colnames(cluster.70.4)[2]<-"cluster"
+```
